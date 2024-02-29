@@ -1,19 +1,26 @@
 import { jest } from '@jest/globals';
-import { Bool, Field } from 'o1js';
+import { Bool, Field, PublicKey, PrivateKey } from 'o1js';
 import { Logger, ILogObj } from 'tslog';
 import {
   DetailsBounds,
   MessageDetails,
   checkSumFails,
   ProcessMessageBatch,
-  Message,
-  details,
-  processBatchSequentially,
   checkBoundsFail,
   checkLocationFails,
+  MessageBoxContract,
+  Message,
+  details,
 } from './MessageBox';
+import { processBatchInChunks, setupEnv } from './MessageBoxInteractions.js';
 
 const log = new Logger<ILogObj>({ name: 'MessageBox.test' });
+
+const AGENT_ZERO = 0
+type Keys = {
+  public: PublicKey;
+  secret: PrivateKey;
+};
 
 const mkMessageDetails = (
   agentId: number,
@@ -27,6 +34,46 @@ const mkMessageDetails = (
     agentYLoc: new Field(agentYLoc),
     checkSum: new Field(agentCheckSum),
   });
+};
+
+const mkMessage = (
+  msgNum: number,
+  agentId: number,
+  agentXLoc: number,
+  agentYLoc: number,
+  agentCheckSum: number
+): Message => {
+  return {
+    num: msgNum,
+    agentId,
+    agentXLoc,
+    agentYLoc,
+    agentCheckSum,
+  };
+};
+
+const minY = DetailsBounds.agentYLoc.min;
+
+const mkValidMessage = (
+  msgNum: number,
+  agentId: number,
+  agentXLoc: number,
+  agentYLoc: number
+): Message => {
+  const agentCheckSum = agentXLoc + agentYLoc + agentId;
+  const ret = mkMessage(msgNum, agentId, agentXLoc, agentYLoc, agentCheckSum);
+  log.debug('Valid message', ret);
+  log.debug('Valid message details', details(ret));
+  if (checkSumFails(details(ret)).toBoolean()) {
+    throw new Error('Sanity check: Invalid checksum');
+  }
+  if (checkLocationFails(details(ret)).toBoolean()) {
+    throw new Error('Sanity check: Invalid location');
+  }
+  if (checkBoundsFail(details(ret)).toBoolean()) {
+    throw new Error('Sanity check: Invalid bounds');
+  }
+  return ret;
 };
 
 const checkSumTest = (msg: MessageDetails): Bool => {
@@ -51,7 +98,7 @@ jest.mock('./MessageBox', () => {
   };
 });
 
-describe('Testing Challenge2 - SpyMaster Message Box', () => {
+describe(`Testing Challenge2 - The SpyMaster's Message Box`, () => {
   beforeAll(async () => {
     log.info('Starting MessageBox tests');
     log.info('Compiling processMessageBatch program...');
@@ -250,40 +297,199 @@ describe('Testing Challenge2 - SpyMaster Message Box', () => {
           expect(checkBoundsFail(msg)).toEqual(Bool(true));
         });
     }),
-    describe('Check the contract behaviour - only valid messages', () => {
-      // prepare a set of 5 valid messages with consecutive numbers
+    describe('Check the MessageBoxContract behaviour - no proofs ', () => {
+      const proofsEnabled = true;
+      let Local;
+      let zkApp: MessageBoxContract;
+      let zkAppAccount: Keys;
+      let owner: Keys;
 
-      // then assert that the highest message number is 5
-      console.log('temp');
-    }),
-    describe('Check the contract behaviour - only valid messages - batched', () => {
-      // prepare a set of 5 valid messages with consecutive numbers use batchsize 2
+      beforeAll(async () => {
+        log.info('Compiling MessageBox programs...');
+        await ProcessMessageBatch.compile();
+        await MessageBoxContract.compile();
 
-      // then assert that the highest message number is 5
+        const {
+          zkapp: app,
+          owner: o,
+          ownerKey,
+          local,
+          zkappKey,
+          zkappAddress,
+        } = await setupEnv({ proofsEnabled });
 
-      console.log('temp');
-    }),
-    describe('Check the contract behaviour - including invalid messages', () => {
-      // prepare a set of [invalid and valid] with consecutive numbers
-      // then assert that the highest message number is 2
+        zkAppAccount = {
+          public: zkappAddress,
+          secret: zkappKey,
+        };
 
-      // prepare a set of [valid and invalid] with consecutive numbers
-      // then assert that the highest message number is 1
+        zkApp = app;
+        owner = {
+          public: o,
+          secret: ownerKey,
+        };
 
-      // prepare a set of [valid, valid, valid, invalid ] with consecutive numbers
-      // then assert that the highest message number is 1
-      console.log('temp');
-    }),
-    describe('Check the contract behaviour - incl invalid and random order', () => {
-      // v4 v1 i6 -> 4
-      console.log('temp');
-    }),
-    describe('Check the contract behaviour - including agent zero messages', () => {
-      // v4 v1 zi6 i7 -> 6
-      console.log('temp');
-    }),
-    describe('Check the contract behaviour - including duplicates (invalid for tests)', () => {
-      // v4 v1 i6 -> 4
-      console.log('temp');
+        Local = local;
+      });
+
+      test('Check the contract behaviour - only valid messages', async () => {
+        // prepare a set of 5 valid messages with consecutive numbers
+
+        const msgs: Message[] = [
+          mkValidMessage(1, 1, 1, minY),
+          mkValidMessage(2, 2, 2, minY),
+          mkValidMessage(3, 3, 3, minY),
+          mkValidMessage(4, 4, 4, minY),
+          mkValidMessage(5, 5, 5, minY),
+        ];
+
+        const oldH = zkApp.highestProcessedMessage.get();
+
+        expect(oldH.equals(new Field(0))).toBeTruthy();
+
+        const { tx, txId } = await processBatchInChunks(
+          zkApp,
+          zkAppAccount.secret,
+          owner.secret,
+          owner.public,
+          msgs,
+          2
+        );
+
+        const newH = zkApp.highestProcessedMessage.get();
+
+        expect(newH.equals(new Field(5))).toBeTruthy();
+      }),
+        test('Check the contract behaviour - including invalid messages #1', async () => {
+          // prepare a set of [invalid and valid] with consecutive numbers
+          const oldH = zkApp.highestProcessedMessage.get();
+          const oldHn = Number(oldH.toString());
+
+          const msgs: Message[] = [
+            mkMessage(oldHn + 1, 1, 1, 1, 13), // invalid bc minY
+            mkValidMessage(oldHn + 2, 2, 2, minY),
+          ];
+
+          const { tx, txId } = await processBatchInChunks(
+            zkApp,
+            zkAppAccount.secret,
+            owner.secret,
+            owner.public,
+            msgs,
+            2
+          );
+
+          const newH = zkApp.highestProcessedMessage.get();
+
+          expect(newH.equals(new Field(oldHn + 2))).toBeTruthy();
+
+          // prepare a set of [valid and invalid] with consecutive numbers
+          // then assert that the highest message number is 1
+
+          // prepare a set of [valid, valid, valid, invalid ] with consecutive numbers
+          // then assert that the highest message number is 1
+          console.log('temp');
+        }),
+        test('Check the contract behaviour - including invalid messages #2', async () => {
+          // prepare a set of [invalid and valid] with consecutive numbers
+          const oldH = zkApp.highestProcessedMessage.get();
+          const oldHn = Number(oldH.toString());
+
+          const msgs: Message[] = [
+            mkValidMessage(oldHn + 1, 2, 2, minY),
+            mkMessage(oldHn + 2, 1, 1, 1, 13), // invalid bc minY
+          ];
+
+          const { tx, txId } = await processBatchInChunks(
+            zkApp,
+            zkAppAccount.secret,
+            owner.secret,
+            owner.public,
+            msgs,
+            2
+          );
+
+          const newH = zkApp.highestProcessedMessage.get();
+
+          expect(newH.equals(new Field(oldHn + 1))).toBeTruthy();
+        }),
+        test('Check the contract behaviour - incl invalid and random order', async () => {
+          // prepare a set of [invalid and valid] with consecutive numbers
+          const oldH = zkApp.highestProcessedMessage.get();
+          const oldHn = Number(oldH.toString());
+
+          const msgs: Message[] = [
+            mkMessage(oldHn + 100, 1, 1, 1, 13), // invalid bc minY
+            mkValidMessage(oldHn + 101, 2, 2, minY),
+            mkMessage(oldHn + 2, 1, 1, 1, 13), // invalid bc minY
+            mkValidMessage(oldHn + 50, 2, 2, minY),
+          ];
+
+          const { tx, txId } = await processBatchInChunks(
+            zkApp,
+            zkAppAccount.secret,
+            owner.secret,
+            owner.public,
+            msgs,
+            2
+          );
+
+          const newH = zkApp.highestProcessedMessage.get();
+
+          expect(newH.equals(new Field(oldHn + 101))).toBeTruthy();
+
+        }),
+        test('Check the contract behaviour - including agent zero messages', async () => {
+          // v4 v1 zi6 i7 -> 6
+
+          const oldH = zkApp.highestProcessedMessage.get();
+          const oldHn = Number(oldH.toString());
+
+          const msgs: Message[] = [
+            mkValidMessage(oldHn + 4, 2, 2, minY),
+            mkValidMessage(oldHn + 1, 2, 2, minY),
+            mkMessage(oldHn + 6, AGENT_ZERO, 1, 1, 13), // valid bc agent_zero
+            mkMessage(oldHn + 7, 10, 1, 1, 13), // valid bc agent_zero
+          ];
+
+          const { tx, txId } = await processBatchInChunks(
+            zkApp,
+            zkAppAccount.secret,
+            owner.secret,
+            owner.public,
+            msgs,
+            2
+          );
+
+          const newH = zkApp.highestProcessedMessage.get();
+
+          expect(newH.equals(new Field(oldHn + 6))).toBeTruthy();
+
+        }),
+        test('Check the contract behaviour - including duplicates (invalid for tests)', async () => {
+          // v4 v1 i6 -> 4
+          const oldH = zkApp.highestProcessedMessage.get();
+          const oldHn = Number(oldH.toString());
+
+          const msgs: Message[] = [
+            mkValidMessage(oldHn - 1, 2, 2, minY),
+            mkMessage(oldHn - 2, AGENT_ZERO, 1, 1, 13), // valid bc agent_zero
+            mkMessage(oldHn - 7, 10, 1, 1, 13), // invalid
+          ];
+
+          const { tx, txId } = await processBatchInChunks(
+            zkApp,
+            zkAppAccount.secret,
+            owner.secret,
+            owner.public,
+            msgs,
+            2
+          );
+
+          const newH = zkApp.highestProcessedMessage.get();
+
+          expect(newH.equals(new Field(oldHn))).toBeTruthy();
+
+        });
     });
 });

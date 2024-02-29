@@ -10,6 +10,7 @@ import {
   State,
   Struct,
   ZkProgram,
+  Permissions
 } from "o1js";
 
 export type Message = {
@@ -19,7 +20,6 @@ export type Message = {
   agentYLoc: number;
   agentCheckSum: number;
 };
-
 
 export class MessageDetails extends Struct({
   agentId: Field,
@@ -150,10 +150,31 @@ export class MessageBoxContract extends SmartContract {
   // store the highest message number
   @state(Field) highestProcessedMessage = State<Field>();
 
+  init() {
+    super.init();
+    this.highestProcessedMessage.set(new Field(0));
+    let p = Permissions.proof();
+    let s = Permissions.signature();
+    this.account.permissions.set({
+      ...Permissions.allImpossible(),
+      access: p,
+      editState: p,
+      editActionState: p,
+      send: p,
+      receive: p
+    });
+  }
+
   @method processBatch(batchProcessProof: ProcessMessageBatchProof) {
     batchProcessProof.verify();
-    this.highestProcessedMessage.set(
-      batchProcessProof.publicOutput.highestMsgNumber,
+    this.highestProcessedMessage.requireEquals(this.highestProcessedMessage.get());
+    const cHigh = this.highestProcessedMessage.get();
+    const pHigh = batchProcessProof.publicOutput.highestMsgNumber;
+    const newHighest = Provable.if(
+      pHigh.greaterThan(cHigh),
+      pHigh,
+      cHigh,
     );
+    this.highestProcessedMessage.set(newHighest);
   }
 }
