@@ -1,4 +1,4 @@
-import { Character, Field, Provable, UInt64 } from "o1js";
+import { Character, Field, UInt64 } from "o1js";
 import { Bool } from "o1js";
 import { Struct } from "o1js";
 // import { Logger, ILogObj } from "tslog";
@@ -79,7 +79,7 @@ export class AgentDetails extends Struct({
 }
 
 
-function processMessage(message: Message, agent: AgentDetails): Bool {
+export function processMessage(message: Message, agent: AgentDetails): Bool {
   log.info('Processing message number: ', message.messageNumber, ' for agent: ', message.details.agentId);
 
   const validLength: Bool = message.details.text.isValid();
@@ -107,26 +107,16 @@ export class MessageBox extends RuntimeModule<{agentWhitelist: Map<AgentId, Agen
     this.agents.set(agentId, agentDetails);
   }
 
-  @runtimeMethod()
-  public processMessage(message: Message): void {
+  public updateState(agentId: AgentId, agentDetails: AgentDetails): void {
+    this.agents.set(agentId, agentDetails);
+  }
 
+  protected ensureAgent(agentId: AgentId): AgentDetails{
     // make sure that agent exists
-    const agent = this.agents.get(message.details.agentId).value;
+    const agent = this.agents.get(agentId).value;
 
     // if agent not found the agent struct will be zeroed out
     const [f1, f2] = agent.securityCode.toFields();
-
-    Provable.asProver(() => {
-      Provable.log('f1 f2', [f1.toString(), f2.toString()])
-      log.info('f1 f2', [f1.toString(), f2.toString()])
-      log.info('Agent message: ', agent.lastMessageNumber.toString());
-      log.info('Agent security: ', agent.securityCode.toString());
-      log.info(
-        'Agent security: ',
-        agent.securityCode.toFields().map((f : Field) => f.toString())
-      );
-    });
-
     assert(
       f1
         .equals(new Field(0))
@@ -135,6 +125,15 @@ export class MessageBox extends RuntimeModule<{agentWhitelist: Map<AgentId, Agen
       'Agent does not exist'
     );
 
+    return agent;
+  }
+
+  @runtimeMethod()
+  public processMessage(message: Message): void {
+    // check for the agent existence
+    const agent: AgentDetails = this.ensureAgent(message.details.agentId)
+
+    // process the message
     const validMessage: Bool = processMessage(message, agent);
     assert(validMessage, "Invalid message");
 
@@ -144,6 +143,6 @@ export class MessageBox extends RuntimeModule<{agentWhitelist: Map<AgentId, Agen
       securityCode: agent.securityCode,
     });
 
-    this.agents.set(message.details.agentId, newAgentDetails);
+    this.updateState(message.details.agentId, newAgentDetails);
   }
 }
