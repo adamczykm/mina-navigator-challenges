@@ -1,4 +1,4 @@
-import { Bool, Field, PublicKey, Struct, UInt64 } from 'o1js';
+import { Bool, PublicKey, Struct, UInt64 } from 'o1js';
 import { runtimeModule, runtimeMethod, state } from '@proto-kit/module';
 import { assert, StateMap } from '@proto-kit/protocol';
 import { log } from '@proto-kit/common';
@@ -9,7 +9,7 @@ import {
   Message,
   AgentDetails,
   MessageNumber,
-  processMessage,
+  doProcessMessage,
   MessageBox,
 } from './message-box.js';
 
@@ -26,7 +26,7 @@ export const ProcessMessageProgram = Experimental.ZkProgram({
     checkMessage: {
       privateInputs: [Message],
       method(agentDetails: AgentDetails, message: Message) {
-        const validMessage: Bool = processMessage(message, agentDetails);
+        const validMessage: Bool = doProcessMessage(message, agentDetails);
         validMessage.assertTrue();
         return new ProcessMessageOutput({
           messageNumber: message.messageNumber,
@@ -64,9 +64,7 @@ export class MessageBoxPrivate extends MessageBox {
 
   @runtimeMethod()
   public override processMessage(_: Message): void {
-    throw new Error(
-      'processMessage is not implemented in MessageBoxPrivate, use processMessagePrivately instead'
-    );
+    assert(Bool(false), 'processMessage is not implemented in MessageBoxPrivate, use processMessagePrivately instead');
   }
 
   @runtimeMethod()

@@ -79,7 +79,7 @@ export class AgentDetails extends Struct({
 }
 
 
-export function processMessage(message: Message, agent: AgentDetails): Bool {
+export function doProcessMessage(message: Message, agent: AgentDetails): Bool {
   log.info('Processing message number: ', message.messageNumber, ' for agent: ', message.details.agentId);
 
   const validLength: Bool = message.details.text.isValid();
@@ -134,7 +134,7 @@ export class MessageBox extends RuntimeModule<{agentWhitelist: Map<AgentId, Agen
     const agent: AgentDetails = this.ensureAgent(message.details.agentId)
 
     // process the message
-    const validMessage: Bool = processMessage(message, agent);
+    const validMessage: Bool = doProcessMessage(message, agent);
     assert(validMessage, "Invalid message");
 
     // update the agent's last message number
