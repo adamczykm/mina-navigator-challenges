@@ -1,4 +1,4 @@
-import { Character, Field, Provable } from "o1js";
+import { Character, Field, Provable, UInt64 } from "o1js";
 import { Bool } from "o1js";
 import { Struct } from "o1js";
 // import { Logger, ILogObj } from "tslog";
@@ -15,6 +15,10 @@ export class AgentCode extends Struct({
 }) {
   public equals(other: AgentCode): Bool {
     return this.c1.equals(other.c1).and(this.c2.equals(other.c2));
+  }
+
+  public toFields() : Field[] {
+    return [this.c1, this.c2];
   }
 
   static fromString(code: string): AgentCode {
@@ -75,7 +79,7 @@ export class AgentDetails extends Struct({
 }
 
 
-export function processMessage(message: Message, agent: AgentDetails): Bool {
+function processMessage(message: Message, agent: AgentDetails): Bool {
   log.info('Processing message number: ', message.messageNumber, ' for agent: ', message.details.agentId);
 
   const validLength: Bool = message.details.text.isValid();
@@ -86,42 +90,50 @@ export function processMessage(message: Message, agent: AgentDetails): Bool {
   return validMessage;
 }
 
-// equality check does not work for fields as keys so we need to use this helper function
-// that search through map as if it was a list
-export const safeFieldGet = <K, V>(map: Map<AgentId, V>, key: AgentId, defaultValue: V): V => {
-  for (const [k, v] of map) {
-    if (k.equals(key)) {
-      return v;
-    }
-  }
-  return defaultValue;
-}
-
 @runtimeModule()
 export class MessageBox extends RuntimeModule<{agentWhitelist: Map<AgentId, AgentDetails>}> {
 
   @state() public agents = StateMap.from<AgentId, AgentDetails>(AgentId, AgentDetails);
 
   @runtimeMethod()
+  public populateAgentWhitelist(
+    agentId: AgentId,
+    agentDetails: AgentDetails
+  ): void {
+    assert(
+      UInt64.from(this.network.block.height).lessThanOrEqual(UInt64.from(0)),
+      'Can only populate agent whitelist at genesis block'
+    );
+    this.agents.set(agentId, agentDetails);
+  }
+
+  @runtimeMethod()
   public processMessage(message: Message): void {
 
     // make sure that agent exists
-    const agentOption = this.agents.get(message.details.agentId)
+    const agent = this.agents.get(message.details.agentId).value;
 
-    const dummy = new AgentDetails({
-      lastMessageNumber: new MessageNumber(0),
-      securityCode: AgentCode.fromString("00")
+    // if agent not found the agent struct will be zeroed out
+    const [f1, f2] = agent.securityCode.toFields();
+
+    Provable.asProver(() => {
+      Provable.log('f1 f2', [f1.toString(), f2.toString()])
+      log.info('f1 f2', [f1.toString(), f2.toString()])
+      log.info('Agent message: ', agent.lastMessageNumber.toString());
+      log.info('Agent security: ', agent.securityCode.toString());
+      log.info(
+        'Agent security: ',
+        agent.securityCode.toFields().map((f : Field) => f.toString())
+      );
     });
 
-    const agent: AgentDetails = Provable.if(
-      agentOption.isSome,
-      agentOption.value,
-      safeFieldGet(this.config.agentWhitelist, message.details.agentId, dummy)
+    assert(
+      f1
+        .equals(new Field(0))
+        .and(f2.equals(new Field(0)))
+        .not(),
+      'Agent does not exist'
     );
-
-    log.info('Config whitelist: ', this.config.agentWhitelist.keys().next().value);
-
-    assert(agent.securityCode.equals(AgentCode.fromString("00")).not(), "Agent does not exist");
 
     const validMessage: Bool = processMessage(message, agent);
     assert(validMessage, "Invalid message");
