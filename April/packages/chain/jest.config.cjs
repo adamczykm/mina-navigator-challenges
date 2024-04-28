@@ -6,6 +6,8 @@
 module.exports = {
     // because we run tests from within ./packages/<package_name>/
     rootDir: './',
+    maxWorkers: 1,
+    snapshotSerializers: ['./test/bigint-serializer.cjs'],
     moduleDirectories: ["node_modules", "src", "test"],
     testPathIgnorePatterns: ["dist"],
     extensionsToTreatAsEsm: ['.ts'],

@@ -1,8 +1,10 @@
+import "reflect-metadata"
+
 import { TestingAppChain } from "@proto-kit/sdk";
-import { CircuitString, PrivateKey, PublicKey } from "o1js";
+import { CircuitString, PrivateKey, PublicKey, UInt64 } from "o1js";
 import { log } from "@proto-kit/common";
 import { AgentCode, AgentDetails, AgentId, Message, MessageNumber, MessageText } from "../src/message-box.js";
-import { MessageBoxPrivate, ProcessMessageProgram } from "../src/message-box-private.js";
+import { AgentTxInfo, MessageBoxPrivate, ProcessMessageProgram } from "../src/message-box-private.js";
 
 log.setLevel("debug");
 
@@ -117,11 +119,18 @@ describe("messagebox-private tests", () => {
     block = await appChain.produceBlock();
 
     message = await appChain.query.runtime.MessageBoxPrivate.agents.get(agentId);
+    const txInfo: AgentTxInfo = await appChain.query.runtime.MessageBoxPrivate.agentTxInfo.get(agentId) as AgentTxInfo;
 
     // tx worked
     expect(block?.transactions[0].status.toBoolean()).toBe(true);
     // state got updated
     expect(message?.lastMessageNumber.equals(new MessageNumber(1)).toBoolean()).toBe(true);
+
+    expect(txInfo.blockHeight.equals(UInt64.from(block!.height)).toBoolean()).toBe(true);
+    expect(txInfo.msgSenderPubKey.equals(agentPublicKey).toBoolean()).toBe(true);
+    expect(txInfo.msgTxNonce.equals(UInt64.from(1)).toBoolean()).toBe(true);
+
+
   }, 1_000_000);
 
   it("should fail for unexisting agent", async () => {

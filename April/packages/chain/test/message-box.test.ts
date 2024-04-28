@@ -1,3 +1,5 @@
+import "reflect-metadata"
+
 import { TestingAppChain } from "@proto-kit/sdk";
 import { CircuitString, PrivateKey, PublicKey } from "o1js";
 import { log } from "@proto-kit/common";

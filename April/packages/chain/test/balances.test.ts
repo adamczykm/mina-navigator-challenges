@@ -1,3 +1,5 @@
+import "reflect-metadata"
+
 import { TestingAppChain } from "@proto-kit/sdk";
 import { PrivateKey } from "o1js";
 import { Balances } from "../src/balances";
@@ -7,11 +9,11 @@ import { BalancesKey, TokenId, UInt64 } from "@proto-kit/library";
 log.setLevel("ERROR");
 
 describe("balances", () => {
-  it("should demonstrate how balances work", async () => {
     const appChain = TestingAppChain.fromRuntime({
       Balances,
     });
 
+  it("should demonstrate how balances work", async () => {
     appChain.configurePartial({
       Runtime: {
         Balances: {
